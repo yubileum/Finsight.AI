@@ -1,0 +1,7 @@
+{
+  "name": "FinSight AI: Smart Statement Analyzer",
+  "description": "An intelligent financial companion that automatically categorizes credit card statements from images and provides deep spending insights using Gemini's thinking capabilities.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
