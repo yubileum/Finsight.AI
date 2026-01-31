@@ -4,12 +4,14 @@ import { Transaction, AnalysisResult, StructuredDeepInsight } from "../types";
 import { getApiKey } from "./apiKeyService";
 
 const MODEL_NAME = 'gemini-3-flash-preview';
+const DEFAULT_API_KEY = 'AIzaSyDhVM3_3Lkoide82iXSgRTpRtkrCyQXMrQ'; // Default key for easy onboarding
 
 function getEffectiveApiKey(): string {
-  const key = getApiKey() || (import.meta.env?.VITE_GEMINI_API_KEY ?? '');
-  if (!key || String(key).trim() === '') {
-    throw new Error('Connect with Google first. Please add your code in Settings.');
-  }
+  // Priority: User's custom key > Environment variable > Default key
+  const userKey = getApiKey();
+  const envKey = import.meta.env?.VITE_GEMINI_API_KEY ?? '';
+
+  const key = userKey || envKey || DEFAULT_API_KEY;
   return String(key).trim();
 }
 
@@ -23,8 +25,18 @@ export interface FilePart {
 /**
  * Extracts transactions and reconciliation summaries from financial documents.
  */
-export async function analyzeStatementParts(parts: FilePart[]): Promise<AnalysisResult> {
+export async function analyzeStatementParts(parts: FilePart[], attempt: number = 1): Promise<AnalysisResult> {
   const ai = new GoogleGenAI({ apiKey: getEffectiveApiKey() });
+
+  // Enhanced prompt for retries
+  const retryInstructions = attempt > 1
+    ? `\n\n⚠️ RETRY ATTEMPT ${attempt}: Previous extraction did not match totals. 
+    - DOUBLE-CHECK every single transaction line
+    - Verify you haven't missed any small transactions
+    - Ensure decimal points are correct
+    - Make sure the reportedTotal matches the GRAND TOTAL on the statement exactly
+    - Count transactions carefully - missing even one will cause mismatch\n`
+    : '';
 
   const response = await ai.models.generateContent({
     model: MODEL_NAME,
@@ -34,7 +46,7 @@ export async function analyzeStatementParts(parts: FilePart[]): Promise<Analysis
         {
           text: `ROLE: ELITE FINANCIAL AUDITOR.
 
-          OBJECTIVE: Extract credit card statement data with 100% MATHEMATICAL CONSISTENCY.
+          OBJECTIVE: Extract credit card statement data with 100% MATHEMATICAL CONSISTENCY.${retryInstructions}
 
           CRITICAL INSTRUCTION - TALLY VERIFICATION:
           1. Extract EVERY line item expense from the statement. Do not skip any.
@@ -141,23 +153,23 @@ export async function analyzeStatementParts(parts: FilePart[]): Promise<Analysis
         : candidates.length === 1
           ? Math.round(parseAmount(candidates[0].reportedTotal) * 100) / 100
           : (() => {
-              // Multiple summaries for same currency (e.g. Purchases + Fees)
-              const summed = candidates.reduce((acc: number, s: any) => acc + parseAmount(s.reportedTotal), 0);
-              const summedRounded = Math.round(summed * 100) / 100;
-              if (Math.abs(summedRounded - ourCalculated) < 0.005) return summedRounded;
-              // Otherwise pick the one closest to our calculated (likely grand total)
-              let best = candidates[0];
-              let bestDiff = Infinity;
-              for (const s of candidates) {
-                const r = Math.round(parseAmount(s.reportedTotal) * 100) / 100;
-                const diff = Math.abs(r - ourCalculated);
-                if (diff < bestDiff) {
-                  bestDiff = diff;
-                  best = s;
-                }
+            // Multiple summaries for same currency (e.g. Purchases + Fees)
+            const summed = candidates.reduce((acc: number, s: any) => acc + parseAmount(s.reportedTotal), 0);
+            const summedRounded = Math.round(summed * 100) / 100;
+            if (Math.abs(summedRounded - ourCalculated) < 0.005) return summedRounded;
+            // Otherwise pick the one closest to our calculated (likely grand total)
+            let best = candidates[0];
+            let bestDiff = Infinity;
+            for (const s of candidates) {
+              const r = Math.round(parseAmount(s.reportedTotal) * 100) / 100;
+              const diff = Math.abs(r - ourCalculated);
+              if (diff < bestDiff) {
+                bestDiff = diff;
+                best = s;
               }
-              return Math.round(parseAmount(best.reportedTotal) * 100) / 100;
-            })();
+            }
+            return Math.round(parseAmount(best.reportedTotal) * 100) / 100;
+          })();
 
       const ourRounded = Math.round(ourCalculated * 100) / 100;
       const reportedRounded = Math.round(reported * 100) / 100;

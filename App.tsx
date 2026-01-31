@@ -23,9 +23,9 @@ const App: React.FC = () => {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [apiKeyReady, setApiKeyReady] = useState(false);
-  const [pendingFile, setPendingFile] = useState<{data: Uint8Array, type: string} | null>(null);
+  const [pendingFile, setPendingFile] = useState<{ data: Uint8Array, type: string } | null>(null);
   const [pdfPassword, setPdfPassword] = useState('');
-  
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadModeRef = useRef<'replace' | 'append'>('replace');
 
@@ -33,16 +33,12 @@ const App: React.FC = () => {
     setApiKeyReady(hasApiKey());
   }, [showApiKeyModal]);
 
-  useEffect(() => {
-    if (!hasApiKey()) setShowApiKeyModal(true);
-  }, []);
-
   const processFile = async (data: Uint8Array, mimeType: string, password?: string) => {
     setError(null);
     setIsAnalyzing(true);
     setLoadingProgress('Initializing...');
     setShowPasswordModal(false);
-    
+
     try {
       const parts: FilePart[] = [];
 
@@ -55,22 +51,22 @@ const App: React.FC = () => {
 
         const pdf = await loadingTask.promise;
         const maxPages = Math.min(pdf.numPages, 12);
-        
+
         setLoadingProgress(`Scanning ${maxPages} pages...`);
         const pagePromises = Array.from({ length: maxPages }, async (_, i) => {
           const pageNum = i + 1;
           const page = await pdf.getPage(pageNum);
-          const viewport = page.getViewport({ scale: 2.5 }); 
+          const viewport = page.getViewport({ scale: 2.5 });
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
-          
+
           if (!context) return null;
 
           canvas.height = viewport.height;
           canvas.width = viewport.width;
           context.fillStyle = 'white';
           context.fillRect(0, 0, canvas.width, canvas.height);
-          
+
           await page.render({ canvasContext: context, viewport }).promise;
           const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
           return {
@@ -94,21 +90,46 @@ const App: React.FC = () => {
 
       if (parts.length === 0) throw new Error("No readable data found.");
 
-      setLoadingProgress('Analyzing Transactions...');
-      const result = await analyzeStatementParts(parts);
-      
+      // Automatic retry logic for reconciliation
+      let result;
+      let attempt = 0;
+      const maxAttempts = 3;
+
+      while (attempt < maxAttempts) {
+        attempt++;
+
+        if (attempt === 1) {
+          setLoadingProgress('Analyzing Transactions...');
+        } else {
+          setLoadingProgress(`Re-analyzing for accuracy (Attempt ${attempt}/${maxAttempts})...`);
+        }
+
+        result = await analyzeStatementParts(parts, attempt);
+
+        const newSummaries = result.summaries.map((s, i) => ({
+          ...s,
+          id: `summary-${Date.now()}-${i}`
+        }));
+
+        const allTally = newSummaries.length > 0 && newSummaries.every(s => s.isTally);
+
+        if (allTally) {
+          // Success! Totals match
+          break;
+        } else if (attempt < maxAttempts) {
+          // Retry with more detailed prompt
+          console.log(`Attempt ${attempt} failed reconciliation. Retrying...`);
+          await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause
+        } else {
+          // Final attempt failed - show warning but still allow the data
+          console.warn('Reconciliation failed after max attempts. Showing data with warning.');
+        }
+      }
+
       const newSummaries = result.summaries.map((s, i) => ({
         ...s,
         id: `summary-${Date.now()}-${i}`
       }));
-
-      const allTally = newSummaries.length > 0 && newSummaries.every(s => s.isTally);
-      if (!allTally) {
-        const msg = newSummaries.length > 0
-          ? `Totals do not match. Calculated sum differs from statement total. Please verify the document and try again.`
-          : `Could not reconcile totals. Please ensure the statement is clear and try again.`;
-        throw new Error(msg);
-      }
 
       const newTransactions = result.transactions;
 
@@ -121,26 +142,43 @@ const App: React.FC = () => {
         setSummaries(newSummaries);
         setDeepAnalysis(null);
       }
-      
+
       setPendingFile(null);
       setPdfPassword('');
     } catch (err: any) {
       console.error('Processing Error:', err);
+
+      // Check for quota/rate limit errors
+      const isQuotaError =
+        err.message?.includes('quota') ||
+        err.message?.includes('rate limit') ||
+        err.message?.includes('RESOURCE_EXHAUSTED') ||
+        err.message?.includes('429') ||
+        err.status === 'RESOURCE_EXHAUSTED' ||
+        err.code === 429;
+
+      if (isQuotaError) {
+        setShowApiKeyModal(true);
+        setError('Daily limit reached on shared API key. Please add your own Google AI API key to continue (it\'s free and takes 2 minutes!)');
+        setIsAnalyzing(false);
+        return;
+      }
+
       const isApiKeyError = err.message?.includes('API Key') || err.message?.includes('API key') || err.message?.includes('Connect with Google');
       if (isApiKeyError) {
         setShowApiKeyModal(true);
         setError(null);
       }
-      
-      const isPasswordError = 
-        err.name === 'PasswordException' || 
-        err.message?.toLowerCase().includes('password') || 
+
+      const isPasswordError =
+        err.name === 'PasswordException' ||
+        err.message?.toLowerCase().includes('password') ||
         err.message?.toLowerCase().includes('no password given') ||
         err.code === 1;
 
       if (isPasswordError) {
         setPendingFile({ data, type: mimeType });
-        setShowPasswordModal(true); 
+        setShowPasswordModal(true);
         if (password) {
           setError("Incorrect password. Please try again.");
         }
@@ -166,25 +204,17 @@ const App: React.FC = () => {
   };
 
   const startNewAnalysis = () => {
-    if (!hasApiKey()) {
-      setShowApiKeyModal(true);
-      return;
-    }
     uploadModeRef.current = 'replace';
     fileInputRef.current?.click();
   };
 
   const addStatement = () => {
-    if (!hasApiKey()) {
-      setShowApiKeyModal(true);
-      return;
-    }
     uploadModeRef.current = 'append';
     fileInputRef.current?.click();
   };
 
   const handleDeepAnalysis = async () => {
-    if (transactions.length === 0 || isThinking || !hasApiKey()) return;
+    if (transactions.length === 0 || isThinking) return;
     setIsThinking(true);
     setError(null);
     try {
@@ -231,7 +261,7 @@ const App: React.FC = () => {
             <p className="text-slate-500 mb-10 leading-relaxed font-medium text-center">Enter your bank statement password to proceed with analysis.</p>
             {error && <div className="mb-8 p-4 bg-red-50 text-red-600 text-xs font-black rounded-2xl border border-red-100 uppercase tracking-widest text-center">{error}</div>}
             <form onSubmit={handlePasswordSubmit}>
-              <input 
+              <input
                 autoFocus
                 type="password"
                 value={pdfPassword}
@@ -269,9 +299,9 @@ const App: React.FC = () => {
               <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
             </button>
             <button onClick={startNewAnalysis} className="px-3 sm:px-6 py-2 sm:py-3 border border-slate-200 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.15em] sm:tracking-[0.3em] rounded-xl sm:rounded-2xl text-slate-700 hover:bg-slate-50 transition-all shadow-sm flex items-center gap-1 sm:gap-2">
-               <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-               <span className="hidden sm:inline">{transactions.length > 0 ? 'New Analysis' : 'Upload Statement'}</span>
-               <span className="sm:hidden">{transactions.length > 0 ? 'New' : 'Upload'}</span>
+              <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+              <span className="hidden sm:inline">{transactions.length > 0 ? 'New Analysis' : 'Upload Statement'}</span>
+              <span className="sm:hidden">{transactions.length > 0 ? 'New' : 'Upload'}</span>
             </button>
           </div>
           <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,application/pdf" className="hidden" />
@@ -288,10 +318,10 @@ const App: React.FC = () => {
 
         {isAnalyzing && (
           <div className="flex flex-col items-center justify-center py-20 sm:py-32 lg:py-40 bg-white rounded-[2rem] sm:rounded-[3rem] lg:rounded-[4rem] border border-slate-100 shadow-lg relative overflow-hidden">
-             <div className="absolute inset-0 bg-gradient-to-b from-indigo-50/30 to-transparent pointer-events-none"></div>
+            <div className="absolute inset-0 bg-gradient-to-b from-indigo-50/30 to-transparent pointer-events-none"></div>
             <div className="relative mb-8 sm:mb-12">
-               <div className="w-24 h-24 sm:w-32 sm:h-32 border-[8px] sm:border-[12px] border-indigo-100 border-t-indigo-600 rounded-full animate-spin"></div>
-               <div className="absolute inset-0 flex items-center justify-center font-bold text-indigo-600 text-xs sm:text-sm">AI</div>
+              <div className="w-24 h-24 sm:w-32 sm:h-32 border-[8px] sm:border-[12px] border-indigo-100 border-t-indigo-600 rounded-full animate-spin"></div>
+              <div className="absolute inset-0 flex items-center justify-center font-bold text-indigo-600 text-xs sm:text-sm">AI</div>
             </div>
             <h3 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-900 tracking-tight mb-3 sm:mb-4 px-4 text-center">Analyzing Your Finances</h3>
             <p className="text-slate-500 font-bold uppercase tracking-[0.15em] sm:tracking-[0.2em] text-[10px] sm:text-xs bg-slate-100 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full animate-pulse">{loadingProgress}</p>
@@ -300,7 +330,7 @@ const App: React.FC = () => {
 
         {!isAnalyzing && transactions.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 sm:py-36 lg:py-48 bg-white rounded-[2rem] sm:rounded-[3rem] lg:rounded-[4rem] border border-slate-100 shadow-lg text-center px-6 sm:px-10 relative overflow-hidden group">
-             <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-50/50 via-white to-white pointer-events-none"></div>
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-50/50 via-white to-white pointer-events-none"></div>
             <div className="w-24 h-24 sm:w-32 sm:h-32 bg-gradient-to-br from-white to-indigo-50 rounded-[2rem] sm:rounded-[3rem] flex items-center justify-center mb-8 sm:mb-12 rotate-3 group-hover:rotate-0 transition-transform shadow-xl shadow-indigo-100/50 border border-indigo-100 relative z-10">
               <svg className="w-12 h-12 sm:w-16 sm:h-16 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
             </div>
