@@ -4,7 +4,7 @@ import { Transaction, AnalysisResult, StructuredDeepInsight } from "../types";
 import { getApiKey } from "./apiKeyService";
 
 const MODEL_NAME = 'gemini-3-flash-preview';
-const DEFAULT_API_KEY = 'AIzaSyDhVM3_3Lkoide82iXSgRTpRtkrCyQXMrQ'; // Default key for easy onboarding
+const DEFAULT_API_KEY = 'AIzaSyCVAVatC6ZQ9lOlIdgXY9RQgyL3LW8bp8I'; // Default key for easy onboarding
 
 function getEffectiveApiKey(): string {
   // Priority: User's custom key > Environment variable > Default key
