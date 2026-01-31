@@ -354,10 +354,12 @@ const App: React.FC = () => {
                 <div className="mt-3 sm:mt-4 text-center">
                   <p className="text-xs sm:text-sm font-bold text-slate-400">
                     Estimated time: <span className="text-indigo-600">
-                      {loadingProgress.includes('Extracting') ? '15-20 seconds' :
-                        loadingProgress.includes('Analyzing') ? '10-15 seconds' :
-                          loadingProgress.includes('Re-analyzing') ? '5-10 seconds' :
-                            '5 seconds'}
+                      {loadingProgress.includes('Extracting') ? '30-45 seconds' :
+                        loadingProgress.includes('Attempt 3') ? '15-25 seconds' :
+                          loadingProgress.includes('Attempt 2') ? '25-35 seconds' :
+                            loadingProgress.includes('Analyzing') ? '45-60 seconds' :
+                              loadingProgress.includes('Re-analyzing') ? '30-45 seconds' :
+                                '10-20 seconds'}
                     </span>
                   </p>
                 </div>

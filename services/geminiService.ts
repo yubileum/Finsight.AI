@@ -59,6 +59,52 @@ export async function analyzeStatementParts(parts: FilePart[], attempt: number =
           - Use numeric amount (e.g. 123.45), not strings. Preserve decimals.
           - Currency: use the symbol/code from the statement (USD, EUR, PLN, GBP, etc.).
 
+          CATEGORY CLASSIFICATION (Choose the most specific category):
+          
+          1. INSURANCE - Any insurance-related payments:
+             - Health insurance, life insurance, car insurance, home insurance
+             - Insurance premiums, policy payments
+             - Examples: "Prudential Life", "Allianz Health", "State Farm Auto"
+          
+          2. INSTALLMENT - Fixed payment plans for purchases (NOT subscriptions):
+             - Phone/device installments, furniture payments, appliance financing
+             - Buy-now-pay-later schemes (Klarna, Afterpay, etc.)
+             - Loan repayments (car loan, personal loan)
+             - Examples: "iPhone 15 Installment 3/12", "Sofa Payment 2/6", "Car Loan"
+          
+          3. RECURRING - Regular subscription services and memberships:
+             - Streaming services (Netflix, Spotify, Disney+)
+             - Software subscriptions (Adobe, Microsoft 365, iCloud)
+             - Gym memberships, club dues
+             - Utility bills (electricity, water, internet, phone plan)
+             - Examples: "Netflix Monthly", "Spotify Premium", "Gold's Gym"
+          
+          4. FOOD & DINING - Meals and groceries:
+             - Restaurants, cafes, fast food
+             - Grocery stores, supermarkets
+             - Food delivery services
+          
+          5. TRANSPORTATION - Travel and commute:
+             - Gas stations, parking, tolls
+             - Ride-sharing (Uber, Lyft, Grab)
+             - Public transport, flights, hotels
+          
+          6. SHOPPING - Retail purchases:
+             - Clothing, electronics, home goods
+             - Online shopping (Amazon, eBay)
+             - Department stores
+          
+          7. ENTERTAINMENT - Leisure activities:
+             - Movies, concerts, events
+             - Gaming, hobbies
+             - Books, music purchases (one-time, not subscriptions)
+          
+          8. HEALTHCARE - Medical expenses:
+             - Doctor visits, pharmacy, dental
+             - Medical supplies, prescriptions
+          
+          9. OTHER - Anything that doesn't fit above categories
+
           OUTPUT JSON:
           {
             "transactions": [{date, description, amount, currency, category}],
