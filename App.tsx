@@ -5,6 +5,8 @@ import { Transaction, StatementSummary, StructuredDeepInsight } from './types';
 import { Dashboard } from './components/Dashboard';
 import { TransactionTable } from './components/TransactionTable';
 import { FinancialInsights } from './components/FinancialInsights';
+import { ApiKeyModal } from './components/ApiKeyModal';
+import { hasApiKey } from './services/apiKeyService';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Initialize PDF.js worker
@@ -19,11 +21,21 @@ const App: React.FC = () => {
   const [deepAnalysis, setDeepAnalysis] = useState<StructuredDeepInsight | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [apiKeyReady, setApiKeyReady] = useState(false);
   const [pendingFile, setPendingFile] = useState<{data: Uint8Array, type: string} | null>(null);
   const [pdfPassword, setPdfPassword] = useState('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadModeRef = useRef<'replace' | 'append'>('replace');
+
+  useEffect(() => {
+    setApiKeyReady(hasApiKey());
+  }, [showApiKeyModal]);
+
+  useEffect(() => {
+    if (!hasApiKey()) setShowApiKeyModal(true);
+  }, []);
 
   const processFile = async (data: Uint8Array, mimeType: string, password?: string) => {
     setError(null);
@@ -114,6 +126,11 @@ const App: React.FC = () => {
       setPdfPassword('');
     } catch (err: any) {
       console.error('Processing Error:', err);
+      const isApiKeyError = err.message?.includes('API Key') || err.message?.includes('API key') || err.message?.includes('Connect with Google');
+      if (isApiKeyError) {
+        setShowApiKeyModal(true);
+        setError(null);
+      }
       
       const isPasswordError = 
         err.name === 'PasswordException' || 
@@ -149,17 +166,25 @@ const App: React.FC = () => {
   };
 
   const startNewAnalysis = () => {
+    if (!hasApiKey()) {
+      setShowApiKeyModal(true);
+      return;
+    }
     uploadModeRef.current = 'replace';
     fileInputRef.current?.click();
   };
 
   const addStatement = () => {
+    if (!hasApiKey()) {
+      setShowApiKeyModal(true);
+      return;
+    }
     uploadModeRef.current = 'append';
     fileInputRef.current?.click();
   };
 
   const handleDeepAnalysis = async () => {
-    if (transactions.length === 0 || isThinking) return;
+    if (transactions.length === 0 || isThinking || !hasApiKey()) return;
     setIsThinking(true);
     setError(null);
     try {
@@ -187,6 +212,13 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-50 via-indigo-50/20 to-slate-50 font-['Inter']">
+      {showApiKeyModal && (
+        <ApiKeyModal
+          onClose={() => setShowApiKeyModal(false)}
+          onSaved={() => setApiKeyReady(true)}
+          showClose={apiKeyReady}
+        />
+      )}
       {showPasswordModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4 animate-in fade-in duration-300">
           <div className="bg-white rounded-[3rem] shadow-2xl max-w-md w-full p-12 animate-in zoom-in-95 border border-slate-100">
@@ -233,6 +265,9 @@ const App: React.FC = () => {
                 <span className="sm:hidden">Add</span>
               </button>
             )}
+            <button onClick={() => setShowApiKeyModal(true)} className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl text-slate-500 hover:bg-slate-50 transition-colors" title="Google connection">
+              <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            </button>
             <button onClick={startNewAnalysis} className="px-3 sm:px-6 py-2 sm:py-3 border border-slate-200 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.15em] sm:tracking-[0.3em] rounded-xl sm:rounded-2xl text-slate-700 hover:bg-slate-50 transition-all shadow-sm flex items-center gap-1 sm:gap-2">
                <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                <span className="hidden sm:inline">{transactions.length > 0 ? 'New Analysis' : 'Upload Statement'}</span>

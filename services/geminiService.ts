@@ -1,8 +1,17 @@
 
-import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { Transaction, AnalysisResult, StructuredDeepInsight } from "../types";
+import { getApiKey } from "./apiKeyService";
 
 const MODEL_NAME = 'gemini-3-flash-preview';
+
+function getEffectiveApiKey(): string {
+  const key = getApiKey() || (import.meta.env?.VITE_GEMINI_API_KEY ?? '');
+  if (!key || String(key).trim() === '') {
+    throw new Error('Connect with Google first. Please add your code in Settings.');
+  }
+  return String(key).trim();
+}
 
 export interface FilePart {
   inlineData: {
@@ -15,7 +24,7 @@ export interface FilePart {
  * Extracts transactions and reconciliation summaries from financial documents.
  */
 export async function analyzeStatementParts(parts: FilePart[]): Promise<AnalysisResult> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getEffectiveApiKey() });
 
   const response = await ai.models.generateContent({
     model: MODEL_NAME,
@@ -192,7 +201,7 @@ export async function analyzeStatementParts(parts: FilePart[]): Promise<Analysis
 }
 
 export async function getDeepInsights(transactions: Transaction[]): Promise<StructuredDeepInsight> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getEffectiveApiKey() });
   const prompt = `Analyze these transactions and provide a structured financial health report. 
   
   Focus on: 
